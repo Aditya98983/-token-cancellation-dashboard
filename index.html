@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Cancellation Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 24px; }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .header { background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); padding: 28px 36px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 8px 32px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .header h1 { font-size: 24px; font-weight: 700; color: #1a1a2e; }
+        .header h1 span { background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header-right { display: flex; align-items: center; gap: 14px; }
+        .sync-badge { background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); color: #1a5c2a; padding: 8px 16px; border-radius: 24px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .sync-badge::before { content: ''; width: 8px; height: 8px; background: #1a5c2a; border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .refresh-btn { background: linear-gradient(135deg, #667eea, #764ba2); border: none; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+        .refresh-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(102,126,234,0.5); }
+        .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .last-synced { font-size: 11px; color: #888; }
+
+        .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .stat-card { background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: 600; }
+        .stat-card .value { font-size: 32px; font-weight: 800; }
+        .stat-card .sub { font-size: 12px; color: #aaa; margin-top: 4px; }
+        .stat-card.purple .value { color: #667eea; }
+        .stat-card.amber .value { color: #f59e0b; }
+        .stat-card.red .value { color: #ef4444; }
+        .stat-card.green .value { color: #10b981; }
+
+        .main-card { background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); overflow: hidden; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; padding: 24px 32px 16px; }
+        .section-header h2 { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+        .filters { display: flex; gap: 6px; }
+        .filter-btn { background: #f3f4f6; border: none; color: #666; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .filter-btn:hover { background: #e5e7eb; }
+        .filter-btn.active { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; box-shadow: 0 2px 8px rgba(102,126,234,0.3); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { padding: 14px 20px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #999; font-weight: 700; background: #fafbfc; border-bottom: 1px solid #eee; }
+        td { padding: 18px 20px; border-bottom: 1px solid #f3f4f6; font-size: 13px; vertical-align: middle; color: #333; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover { background: #f9fafb; }
+
+        .thread-name { font-weight: 700; color: #1a1a2e; margin-bottom: 4px; font-size: 13px; }
+        .channel-link { color: #667eea; text-decoration: none; font-size: 11px; font-weight: 500; }
+        .channel-link:hover { text-decoration: underline; }
+
+        .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; }
+        .status-in-progress { background: #eff6ff; color: #3b82f6; }
+        .status-completed { background: #ecfdf5; color: #10b981; }
+        .status-overdue { background: #fef2f2; color: #ef4444; }
+        .status-follow-up { background: #fef3c7; color: #d97706; }
+
+        .eta-bar { width: 100%; height: 5px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+        .eta-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+        .eta-text { font-size: 12px; color: #333; font-weight: 600; }
+
+        .days-left { font-size: 22px; font-weight: 800; }
+        .days-sub { font-size: 10px; color: #999; margin-top: 2px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .followup-schedule { display: flex; flex-direction: column; gap: 6px; }
+        .followup-item { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+        .followup-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
+        .followup-dot.done { background: #10b981; border-color: #10b981; }
+        .followup-dot.due { background: #f59e0b; border-color: #f59e0b; animation: pulse 1.5s infinite; }
+        .followup-dot.upcoming { background: #fff; border-color: #ddd; }
+        .followup-label { color: #555; font-weight: 500; }
+        .followup-date { color: #999; font-size: 10px; }
+
+        .action-btn { padding: 7px 14px; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .btn-follow-up { background: #eff6ff; color: #3b82f6; }
+        .btn-follow-up:hover { background: #dbeafe; }
+        .btn-close { background: #ecfdf5; color: #10b981; }
+        .btn-close:hover { background: #d1fae5; }
+        .actions-cell { display: flex; gap: 6px; }
+
+        .raised-date { font-size: 13px; color: #333; font-weight: 600; }
+        .raised-by { font-size: 11px; color: #999; margin-top: 3px; }
+
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #fff; border-radius: 20px; padding: 36px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal h3 { font-size: 20px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+        .modal p { font-size: 13px; color: #888; margin-bottom: 20px; }
+        .modal textarea { width: 100%; background: #f9fafb; border: 2px solid #eee; border-radius: 12px; padding: 14px; color: #333; font-size: 14px; resize: vertical; min-height: 100px; margin-bottom: 20px; transition: border-color 0.2s; }
+        .modal textarea:focus { outline: none; border-color: #667eea; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .modal-btn { padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .modal-btn.primary { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; box-shadow: 0 4px 12px rgba(102,126,234,0.3); }
+        .modal-btn.primary:hover { transform: translateY(-1px); }
+        .modal-btn.secondary { background: #f3f4f6; color: #666; }
+
+        .toast { position: fixed; bottom: 24px; right: 24px; background: #fff; border-left: 4px solid #10b981; color: #333; padding: 16px 24px; border-radius: 12px; font-size: 13px; font-weight: 500; display: none; z-index: 2000; box-shadow: 0 8px 24px rgba(0,0,0,0.12); animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span>Emandate</span> Token Cancellation Tracker</h1>
+            <div class="header-right">
+                <div class="sync-badge">#mandate-token-cancellation-request</div>
+                <button class="refresh-btn" onclick="refreshData()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                    Refresh
+                </button>
+                <div class="last-synced" id="lastSynced"></div>
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-card purple">
+                <div class="label">Total Requests</div>
+                <div class="value" id="statTotal">0</div>
+                <div class="sub">Active tracking</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="label">In Progress</div>
+                <div class="value" id="statProgress">0</div>
+                <div class="sub">Within SLA</div>
+            </div>
+            <div class="stat-card amber">
+                <div class="label">Follow-up Due</div>
+                <div class="value" id="statFollowUp">0</div>
+                <div class="sub">Needs attention</div>
+            </div>
+            <div class="stat-card red">
+                <div class="label">Overdue</div>
+                <div class="value" id="statOverdue">0</div>
+                <div class="sub">Past 20-day SLA</div>
+            </div>
+        </div>
+
+        <div class="main-card">
+            <div class="section-header">
+                <h2>All Requests</h2>
+                <div class="filters">
+                    <button class="filter-btn active" onclick="filterTable('all', this)">All</button>
+                    <button class="filter-btn" onclick="filterTable('in-progress', this)">In Progress</button>
+                    <button class="filter-btn" onclick="filterTable('follow-up', this)">Follow-up Due</button>
+                    <button class="filter-btn" onclick="filterTable('overdue', this)">Overdue</button>
+                    <button class="filter-btn" onclick="filterTable('completed', this)">Completed</button>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Request</th>
+                        <th>Raised On</th>
+                        <th>20-Day ETA</th>
+                        <th>Days Left</th>
+                        <th>Follow-up Schedule</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="requestTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Follow-up Modal -->
+    <div class="modal-overlay" id="followUpModal">
+        <div class="modal">
+            <h3>Send Follow-up</h3>
+            <p>This will be posted on the Slack thread for <strong id="modalMerchant"></strong></p>
+            <textarea id="followUpMessage"></textarea>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModal('followUpModal')">Cancel</button>
+                <button class="modal-btn primary" onclick="sendFollowUp()">Post to Thread</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Close Modal -->
+    <div class="modal-overlay" id="closeModalOverlay">
+        <div class="modal">
+            <h3>Close Request</h3>
+            <p>Mark <strong id="closeModalMerchant"></strong> as completed and notify on thread.</p>
+            <textarea id="closeMessage"></textarea>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeModal('closeModalOverlay')">Cancel</button>
+                <button class="modal-btn primary" onclick="closeRequest()">Close & Notify</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const TODAY = new Date();
+        const SLA_DAYS = 20;
+        const FOLLOWUP_1_DAY = 7;
+        const FOLLOWUP_2_DAY = 14;
+
+        let requests = [];
+        let selectedRequest = null;
+
+        function addWorkingDays(startDate, days) {
+            const d = new Date(startDate);
+            let added = 0;
+            while (added < days) {
+                d.setDate(d.getDate() + 1);
+                if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+            }
+            return d;
+        }
+
+        function countWorkingDays(from, to) {
+            let count = 0;
+            const d = new Date(from);
+            while (d < to) {
+                d.setDate(d.getDate() + 1);
+                if (d.getDay() !== 0 && d.getDay() !== 6) count++;
+            }
+            return count;
+        }
+
+        function getEtaDate(raisedDate) {
+            return addWorkingDays(new Date(raisedDate), SLA_DAYS);
+        }
+
+        function getDaysLeft(raisedDate) {
+            const eta = getEtaDate(raisedDate);
+            return countWorkingDays(TODAY, eta);
+        }
+
+        function getElapsedDays(raisedDate) {
+            return countWorkingDays(new Date(raisedDate), TODAY);
+        }
+
+        function getProgress(raisedDate) {
+            const elapsed = getElapsedDays(raisedDate);
+            return Math.min(100, Math.max(0, (elapsed / SLA_DAYS) * 100));
+        }
+
+        function getBarColor(daysLeft) {
+            if (daysLeft <= 0) return '#ef4444';
+            if (daysLeft <= 5) return '#f59e0b';
+            if (daysLeft <= 10) return '#667eea';
+            return '#10b981';
+        }
+
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+
+        function getFollowUpStatus(raisedDate, dayMark) {
+            const elapsed = getElapsedDays(raisedDate);
+            if (elapsed >= dayMark) return 'done';
+            if (elapsed >= dayMark - 2) return 'due';
+            return 'upcoming';
+        }
+
+        function getFollowUpDate(raisedDate, dayMark) {
+            return addWorkingDays(new Date(raisedDate), dayMark);
+        }
+
+        function renderTable(filter = 'all') {
+            const tbody = document.getElementById('requestTable');
+            const filtered = filter === 'all' ? requests : requests.filter(r => r.status === filter);
+
+            tbody.innerHTML = filtered.map(r => {
+                const daysLeft = getDaysLeft(r.raisedDate);
+                const progress = getProgress(r.raisedDate);
+                const barColor = getBarColor(daysLeft);
+                const etaDate = getEtaDate(r.raisedDate);
+                const statusClass = `status-${r.status}`;
+                const statusLabel = r.status === 'in-progress' ? 'In Progress' : r.status === 'follow-up' ? 'Follow-up Due' : r.status === 'completed' ? 'Completed' : 'Overdue';
+
+                const fu1Status = getFollowUpStatus(r.raisedDate, FOLLOWUP_1_DAY);
+                const fu2Status = getFollowUpStatus(r.raisedDate, FOLLOWUP_2_DAY);
+                const fu1Date = getFollowUpDate(r.raisedDate, FOLLOWUP_1_DAY);
+                const fu2Date = getFollowUpDate(r.raisedDate, FOLLOWUP_2_DAY);
+
+                return `
+                    <tr>
+                        <td>
+                            <div class="thread-name">${r.name}</div>
+                            <a href="${r.slackLink}" target="_blank" class="channel-link">Open Thread ↗</a>
+                        </td>
+                        <td>
+                            <div class="raised-date">${formatDate(r.raisedDate)}</div>
+                            <div class="raised-by">by ${r.raisedBy}</div>
+                        </td>
+                        <td>
+                            <div class="eta-text">${formatDate(etaDate.toISOString().split('T')[0])}</div>
+                            <div class="eta-bar">
+                                <div class="eta-fill" style="width: ${progress}%; background: ${barColor};"></div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="days-left" style="color: ${barColor};">${daysLeft > 0 ? daysLeft : 0}</div>
+                            <div class="days-sub">${daysLeft > 0 ? 'working days' : 'OVERDUE'}</div>
+                        </td>
+                        <td>
+                            <div class="followup-schedule">
+                                <div class="followup-item">
+                                    <div class="followup-dot ${fu1Status}"></div>
+                                    <span class="followup-label">1st: Day 7</span>
+                                    <span class="followup-date">${formatDate(fu1Date.toISOString().split('T')[0])}</span>
+                                </div>
+                                <div class="followup-item">
+                                    <div class="followup-dot ${fu2Status}"></div>
+                                    <span class="followup-label">2nd: Day 14</span>
+                                    <span class="followup-date">${formatDate(fu2Date.toISOString().split('T')[0])}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+                        <td>
+                            <div class="actions-cell">
+                                <button class="action-btn btn-follow-up" onclick="openFollowUp(${r.id})">Follow Up</button>
+                                <button class="action-btn btn-close" onclick="openClose(${r.id})">Close</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function filterTable(status, btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderTable(status);
+        }
+
+        function openFollowUp(id) {
+            selectedRequest = requests.find(r => r.id === id);
+            const daysLeft = getDaysLeft(selectedRequest.raisedDate);
+            document.getElementById('modalMerchant').textContent = selectedRequest.name;
+            document.getElementById('followUpMessage').value = `Hi team, following up on this request (${selectedRequest.name}). ${daysLeft} working days remaining in the 20-day SLA. Please share the current status.`;
+            document.getElementById('followUpModal').classList.add('active');
+        }
+
+        function openClose(id) {
+            selectedRequest = requests.find(r => r.id === id);
+            document.getElementById('closeModalMerchant').textContent = selectedRequest.name;
+            document.getElementById('closeMessage').value = `Token cancellation request for ${selectedRequest.name} has been completed and closed.`;
+            document.getElementById('closeModalOverlay').classList.add('active');
+        }
+
+        function closeModal(modalId) { document.getElementById(modalId).classList.remove('active'); }
+
+        function sendFollowUp() {
+            closeModal('followUpModal');
+            showToast('Follow-up posted: ' + selectedRequest.name);
+        }
+
+        function closeRequest() {
+            selectedRequest.status = 'completed';
+            closeModal('closeModalOverlay');
+            renderTable();
+            updateStats();
+            showToast('Closed: ' + selectedRequest.name);
+        }
+
+        function updateStats() {
+            document.getElementById('statTotal').textContent = requests.length;
+            document.getElementById('statProgress').textContent = requests.filter(r => r.status === 'in-progress').length;
+            document.getElementById('statFollowUp').textContent = requests.filter(r => r.status === 'follow-up').length;
+            document.getElementById('statOverdue').textContent = requests.filter(r => r.status === 'overdue').length;
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 4000);
+        }
+
+        function loadData() {
+            fetch('data.json?' + Date.now())
+                .then(res => res.json())
+                .then(data => {
+                    requests = data;
+                    requests.forEach(r => {
+                        if (r.status !== 'completed' && getDaysLeft(r.raisedDate) <= 0) {
+                            r.status = 'overdue';
+                        }
+                    });
+                    updateStats();
+                    renderTable();
+                    document.getElementById('lastSynced').textContent = 'Loaded: ' + new Date().toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'});
+                });
+        }
+
+        function refreshData() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.classList.add('spinning');
+            btn.disabled = true;
+            fetch('data.json?' + Date.now())
+                .then(res => res.json())
+                .then(data => {
+                    requests = data;
+                    requests.forEach(r => {
+                        if (r.status !== 'completed' && getDaysLeft(r.raisedDate) <= 0) {
+                            r.status = 'overdue';
+                        }
+                    });
+                    updateStats();
+                    renderTable();
+                    document.getElementById('lastSynced').textContent = 'Loaded: ' + new Date().toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'});
+                    btn.classList.remove('spinning');
+                    btn.disabled = false;
+                    showToast('Dashboard refreshed');
+                });
+        }
+
+        loadData();
+    </script>
+</body>
+</html>

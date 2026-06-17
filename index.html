@@ -351,16 +351,43 @@
         function closeModal(modalId) { document.getElementById(modalId).classList.remove('active'); }
 
         function sendFollowUp() {
+            const message = document.getElementById('followUpMessage').value;
+            fetch('/api/action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    type: 'follow-up',
+                    requestId: selectedRequest.id,
+                    name: selectedRequest.name,
+                    threadTs: selectedRequest.threadTs,
+                    message: message,
+                    timestamp: new Date().toISOString()
+                })
+            });
             closeModal('followUpModal');
-            showToast('Follow-up posted: ' + selectedRequest.name);
+            showToast('Follow-up queued for Slack: ' + selectedRequest.name);
         }
 
         function closeRequest() {
+            const message = document.getElementById('closeMessage').value;
+            fetch('/api/action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    type: 'close',
+                    requestId: selectedRequest.id,
+                    name: selectedRequest.name,
+                    threadTs: selectedRequest.threadTs,
+                    message: message,
+                    timestamp: new Date().toISOString()
+                })
+            });
             selectedRequest.status = 'completed';
+            saveClosedId(selectedRequest.id);
             closeModal('closeModalOverlay');
             renderTable();
             updateStats();
-            showToast('Closed: ' + selectedRequest.name);
+            showToast('Closed & Slack notification queued: ' + selectedRequest.name);
         }
 
         function updateStats() {
@@ -377,16 +404,36 @@
             setTimeout(() => toast.style.display = 'none', 4000);
         }
 
+        function getClosedIds() {
+            try { return JSON.parse(localStorage.getItem('closedRequests') || '[]'); }
+            catch { return []; }
+        }
+
+        function saveClosedId(id) {
+            const closed = getClosedIds();
+            if (!closed.includes(id)) {
+                closed.push(id);
+                localStorage.setItem('closedRequests', JSON.stringify(closed));
+            }
+        }
+
+        function applyClosedStatus() {
+            const closedIds = getClosedIds();
+            requests.forEach(r => {
+                if (closedIds.includes(r.id)) {
+                    r.status = 'completed';
+                } else if (r.status !== 'completed' && getDaysLeft(r.raisedDate) <= 0) {
+                    r.status = 'overdue';
+                }
+            });
+        }
+
         function loadData() {
             fetch('data.json?' + Date.now())
                 .then(res => res.json())
                 .then(data => {
                     requests = data;
-                    requests.forEach(r => {
-                        if (r.status !== 'completed' && getDaysLeft(r.raisedDate) <= 0) {
-                            r.status = 'overdue';
-                        }
-                    });
+                    applyClosedStatus();
                     updateStats();
                     renderTable();
                     document.getElementById('lastSynced').textContent = 'Loaded: ' + new Date().toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'});
@@ -401,11 +448,7 @@
                 .then(res => res.json())
                 .then(data => {
                     requests = data;
-                    requests.forEach(r => {
-                        if (r.status !== 'completed' && getDaysLeft(r.raisedDate) <= 0) {
-                            r.status = 'overdue';
-                        }
-                    });
+                    applyClosedStatus();
                     updateStats();
                     renderTable();
                     document.getElementById('lastSynced').textContent = 'Loaded: ' + new Date().toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'});

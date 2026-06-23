@@ -1,0 +1,15 @@
+{
+  "name": "token-cancellation-backend",
+  "version": "1.0.0",
+  "description": "Backend for Emandate Token Cancellation Tracker — Slack integration, auto-reminders, slash commands",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "node-cron": "^3.0.3",
+    "cors": "^2.8.5"
+  }
+}

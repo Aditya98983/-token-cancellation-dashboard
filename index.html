@@ -17,6 +17,8 @@
         .sync-badge { background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%); color: #1a5c2a; padding: 8px 16px; border-radius: 24px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
         .sync-badge::before { content: ''; width: 8px; height: 8px; background: #1a5c2a; border-radius: 50%; animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .create-btn { background: linear-gradient(135deg, #10b981, #059669); border: none; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 4px 12px rgba(16,185,129,0.4); }
+        .create-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16,185,129,0.5); }
         .refresh-btn { background: linear-gradient(135deg, #667eea, #764ba2); border: none; color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
         .refresh-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(102,126,234,0.5); }
         .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
@@ -79,6 +81,8 @@
         .btn-follow-up:hover { background: #dbeafe; }
         .btn-close { background: #ecfdf5; color: #10b981; }
         .btn-close:hover { background: #d1fae5; }
+        .btn-delete { background: #fef2f2; color: #ef4444; padding: 7px 10px; }
+        .btn-delete:hover { background: #fee2e2; }
         .actions-cell { display: flex; gap: 6px; }
 
         .raised-date { font-size: 13px; color: #333; font-weight: 600; }
@@ -106,6 +110,7 @@
         <div class="header">
             <h1><span>Emandate</span> Token Cancellation Tracker</h1>
             <div class="header-right">
+                <button class="create-btn" onclick="openCreateTicket()">+ New Ticket</button>
                 <div class="sync-badge">#mandate-token-cancellation-request</div>
                 <button class="refresh-btn" onclick="refreshData()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -320,6 +325,7 @@
                             <div class="actions-cell">
                                 <button class="action-btn btn-follow-up" onclick="openFollowUp(${r.id})">Follow Up</button>
                                 <button class="action-btn btn-close" onclick="openClose(${r.id})">Close</button>
+                                <button class="action-btn btn-delete" onclick="deleteTicket(${r.id})">✕</button>
                             </div>
                         </td>
                     </tr>
@@ -350,44 +356,83 @@
 
         function closeModal(modalId) { document.getElementById(modalId).classList.remove('active'); }
 
+        const API_BASE = window.location.port === '8091' ? '' : 'http://localhost:8091';
+
         function sendFollowUp() {
             const message = document.getElementById('followUpMessage').value;
-            fetch('/api/action', {
+            fetch(API_BASE + '/api/followup', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    type: 'follow-up',
-                    requestId: selectedRequest.id,
-                    name: selectedRequest.name,
-                    threadTs: selectedRequest.threadTs,
-                    message: message,
-                    timestamp: new Date().toISOString()
-                })
+                body: JSON.stringify({ id: selectedRequest.id, message: message })
+            }).then(r => r.json()).then(res => {
+                if (res.ok) showToast('✅ Follow-up sent to Slack: ' + selectedRequest.name);
+                else showToast('❌ Error: ' + (res.error || 'Unknown'));
+            }).catch(() => {
+                fetch('/api/action', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type: 'follow-up', requestId: selectedRequest.id, name: selectedRequest.name, threadTs: selectedRequest.threadTs, message: message, timestamp: new Date().toISOString() })
+                });
+                showToast('Follow-up queued (backend offline, will post on next sync)');
             });
             closeModal('followUpModal');
-            showToast('Follow-up queued for Slack: ' + selectedRequest.name);
         }
 
         function closeRequest() {
             const message = document.getElementById('closeMessage').value;
-            fetch('/api/action', {
+            fetch(API_BASE + '/api/close', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    type: 'close',
-                    requestId: selectedRequest.id,
-                    name: selectedRequest.name,
-                    threadTs: selectedRequest.threadTs,
-                    message: message,
-                    timestamp: new Date().toISOString()
-                })
+                body: JSON.stringify({ id: selectedRequest.id, message: message })
+            }).then(r => r.json()).then(res => {
+                if (res.ok) showToast('✅ Closed & posted to Slack: ' + selectedRequest.name);
+                else showToast('❌ Error: ' + (res.error || 'Unknown'));
+            }).catch(() => {
+                fetch('/api/action', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type: 'close', requestId: selectedRequest.id, name: selectedRequest.name, threadTs: selectedRequest.threadTs, message: message, timestamp: new Date().toISOString() })
+                });
+                showToast('Close queued (backend offline, will post on next sync)');
             });
             selectedRequest.status = 'completed';
             saveClosedId(selectedRequest.id);
             closeModal('closeModalOverlay');
             renderTable();
             updateStats();
-            showToast('Closed & Slack notification queued: ' + selectedRequest.name);
+        }
+
+        function deleteTicket(id) {
+            const item = requests.find(r => r.id === id);
+            if (!confirm('Delete "' + item.name + '" from the tracker?')) return;
+            requests = requests.filter(r => r.id !== id);
+            // Save to backend
+            fetch(API_BASE + '/api/tickets/' + id, { method: 'DELETE' }).catch(() => {});
+            // Also save locally
+            fetch('/api/action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ type: 'delete', requestId: id, name: item.name, timestamp: new Date().toISOString() })
+            }).catch(() => {});
+            updateStats();
+            renderTable();
+            showToast('Deleted: ' + item.name);
+        }
+
+        function openCreateTicket() {
+            const name = prompt('Merchant Name:');
+            if (!name) return;
+            const raisedBy = prompt('Raised By (your name):', 'Aditya Kishor');
+            fetch(API_BASE + '/api/tickets', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, raisedBy })
+            }).then(r => r.json()).then(res => {
+                if (res.ok) {
+                    showToast('✅ Ticket created: ' + name);
+                    refreshData();
+                }
+            }).catch(() => showToast('❌ Backend offline — start backend server first'));
         }
 
         function updateStats() {

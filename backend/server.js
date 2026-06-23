@@ -3,6 +3,17 @@ const cors = require('cors');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
+
+function gitPush() {
+  try {
+    const repoDir = path.resolve(__dirname, '..');
+    execSync('git add data.json index.html && git diff --cached --quiet || git commit -m "Auto-sync: update dashboard data" && git push', { cwd: repoDir, stdio: 'pipe' });
+    console.log(`[GIT] Pushed changes to GitHub`);
+  } catch (err) {
+    console.error('[GIT] Push failed:', err.message);
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -79,6 +90,7 @@ app.post('/api/followup', (req, res) => {
 
   item.status = 'follow-up';
   writeData(data);
+  gitPush();
 
   res.json({ ok: true, message: 'Follow-up queued for posting' });
 });
@@ -104,6 +116,7 @@ app.post('/api/close', (req, res) => {
 
   item.status = 'completed';
   writeData(data);
+  gitPush();
 
   res.json({ ok: true, message: 'Closure queued for posting' });
 });
@@ -118,6 +131,7 @@ app.delete('/api/tickets/:id', (req, res) => {
 
   data = data.filter(d => d.id !== id);
   writeData(data);
+  gitPush();
   res.json({ ok: true, message: `Deleted: ${item.name}` });
 });
 
@@ -144,6 +158,7 @@ app.post('/api/tickets', (req, res) => {
 
   data.push(newEntry);
   writeData(data);
+  gitPush();
 
   res.json({ ok: true, ticket: newEntry });
 });
